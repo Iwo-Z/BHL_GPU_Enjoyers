@@ -64,6 +64,44 @@ GOODBYES = [
 
 # LABEL 3: OTHERS / TRICKY (Inne + Podchwytliwe) - ROZSZERZONE
 TRICKY_PHRASES = [
+    # Pytania podstawowe (1-2 słowa)
+    "what now", "how", "why", "when", "where",
+    "who", "which one", "how much", "how many",
+    "what else", "and then", "like what", "such as",
+    "for example", "meaning", "really", "seriously",
+    "sure", "okay", "right", "exactly", "precisely",
+    "indeed", "continue", "go on", "next", "more",
+    "again", "repeat", "clarify", "elaborate",
+    "explain", "show me", "tell me", "prove it",
+    "source", "evidence", "reference", "citation",
+
+    # Krótkie reakcje/komentarze
+    "I see", "got it", "makes sense", "interesting",
+    "fascinating", "weird", "strange", "odd",
+    "curious", "wait", "hold on", "stop",
+    "pause", "not quite", "almost", "close",
+    "nope", "wrong", "incorrect", "false",
+    "true", "correct", "right answer",
+
+    # Prośby o działanie
+    "try again", "redo", "rewrite", "fix it",
+    "correct", "improve", "optimize", "simplify",
+    "expand", "shorten", "summarize", "list them",
+    "show examples", "give details", "be specific",
+    "be brief",
+
+    # Pytania o możliwości
+    "can you", "could you", "would you", "will you",
+    "are you able", "is it possible", "do you know",
+    "any ideas", "suggestions", "alternatives",
+    "options", "other ways",
+
+    # Weryfikacja/walidacja
+    "double check", "verify", "confirm", "is that right",
+    "you sure", "certain", "positive", "guaranteed",
+    "always", "never", "sometimes", "usually",
+    "often", "rarely",
+
     # Podchwytliwe z "Thanks"
     "thanks but I don't understand",
     "thanks but that is wrong",
@@ -149,7 +187,6 @@ TRICKY_PHRASES = [
     "assess the impact of",
     "identify the key components"
 ]
-
 
 # ===========================================
 # 2. FUNKCJE POMOCNICZE
@@ -335,7 +372,7 @@ def build_final_dataset():
 
     # Obliczenie ile Label 3 potrzebujemy
     base_count = len(data_greetings) + len(data_thanks) + len(data_goodbyes)
-    target_label3 = 2 * base_count
+    target_label3 = base_count
     current_label3 = len(data_others)
 
     print(f"\nStatystyki przed dodaniem zewnętrznych danych:")
