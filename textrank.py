@@ -1,5 +1,6 @@
 import nltk
 import re
+import numpy as np
 import networkx as nx
 from nltk.corpus import stopwords
 from nltk.tokenize import sent_tokenize, word_tokenize
@@ -10,7 +11,7 @@ from heapq import nlargest
 # --- NLTK Resource Management (Run once on module load) ---
 def _ensure_nltk_resources():
     """Checks and downloads necessary NLTK resources."""
-    resources = ['stopwords', 'punkt', 'averaged_perceptron_tagger', 'averaged_perceptron_tagger_eng']
+    resources = ['stopwords', 'punkt', 'averaged_perceptron_tagger']
     for resource in resources:
         try:
             # Check for specific resource, e.g., stopwords.words('english')
@@ -31,10 +32,11 @@ class TextRankSummarizer:
     """
     A Hybrid Extractive-Compressive Summarizer based on TextRank
     and deterministic Part-of-Speech (POS) based sentence pruning.
+    
+    The summary length is controlled by the percentage of the original total word count.
     """
 
-    def __init__(self, damping_factor=0.85):
-        self.damping_factor = damping_factor
+    def __init__(self):
         self.stop_words = set(stopwords.words('english'))
         self.vectorizer = TfidfVectorizer()
 
@@ -58,23 +60,24 @@ class TextRankSummarizer:
         """
         Compresses a single sentence by removing non-essential POS tags.
         
-        The compression rules are deterministic and aim to keep the core
-        Subject-Verb-Object (SVO) structure intact.
-        
-        Tags to keep (core structure):
-        NN*, VB*, CD (Nouns, Verbs, Numbers)
-        PRP, DT (Pronouns, Determiners like 'the')
-        IN (Prepositions) - often needed to link core phrases
-        
-        Tags to prune (non-essential modifiers/adverbials):
-        JJ*, RB* (Adjectives, Adverbs) - removing these simplifies
-        W* (Wh-words) - often used in non-restrictive clauses (which are complex to handle fully without a full parser)
+        If an error occurs during POS tagging (e.g., missing resource), the
+        original sentence words are preserved to prevent returning an empty string.
         """
         words = word_tokenize(sentence)
         
-        # Part-of-Speech Tagging
-        tagged_words = nltk.pos_tag(words)
-
+        try:
+            # Part-of-Speech Tagging
+            tagged_words = nltk.pos_tag(words)
+        except Exception as e:
+            # If POS tagging fails, use original words without compression
+            print(f"Warning: POS tagging failed for sentence. Returning original words. Error: {e}")
+            compressed_words = words
+            
+            # If tagging failed, skip to the joining section
+            compressed_text = ' '.join(compressed_words)
+            compressed_text = re.sub(r'\s([,\.\?!:])', r'\1', compressed_text)
+            return compressed_text.capitalize()
+            
         # Define the set of essential tags (core SVO)
         essential_tags = {'NN', 'NNS', 'NNP', 'NNPS',  # Nouns
                           'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', # Verbs
@@ -85,9 +88,14 @@ class TextRankSummarizer:
             # Simple check: keep if the tag is in the essential set
             if tag in essential_tags or tag.startswith('NN') or tag.startswith('VB'):
                  compressed_words.append(word)
-            # Exception: Keep common structural words like 'is', 'are', 'was' if they are verbs
-            # This is largely covered by 'VB*' tags, but ensures we don't over-prune linking verbs.
         
+        # FIX: If compression removed ALL words (but there were input words),
+        # return original words to avoid empty string.
+        if not compressed_words and words:
+             compressed_words = [word for word, tag in tagged_words if word.isalnum()]
+             if not compressed_words: # Final safeguard
+                 compressed_words = words
+
         # Simple join. A more advanced method would re-insert proper punctuation.
         compressed_text = ' '.join(compressed_words)
         
@@ -96,22 +104,54 @@ class TextRankSummarizer:
         
         return compressed_text.capitalize() # Start with a capital letter
 
-    def summarize(self, input_text, summary_percentage=0.3):
+    def _handle_single_sentence_case(self, original_sentences, cleaned_sentences, target_word_count):
+        """
+        Handle the special case when there's only one sentence.
+        Applies compression and returns the result.
+        """
+        if not original_sentences:
+            return "Cannot summarize empty content."
+            
+        single_sentence = original_sentences[0]
+        compressed = self._compress_sentence(single_sentence)
+        compressed_words = compressed.split()
+        
+        # If the compressed version is within target or we have only one sentence,
+        # return the compressed version
+        if len(compressed_words) <= target_word_count or len(original_sentences) == 1:
+            return compressed
+        else:
+            # If compressed is still too long, truncate to target word count
+            return ' '.join(compressed_words[:target_word_count])
+
+    def summarize(self, input_text, summary_percentage=0.7):
         """
         Generates the compressed summary.
+        
+        The summary length is determined by a percentage of the original word count.
 
         Args:
             input_text (str): The document to summarize.
-            summary_percentage (float): Percentage of original sentences to select.
+            summary_percentage (float): Percentage of original total word count to target.
         """
         original_sentences, cleaned_sentences = self._clean_and_process_sentences(input_text)
 
         if not original_sentences or all(not s for s in cleaned_sentences):
             return "Cannot summarize empty or non-text content."
 
-        num_sentences_to_select = max(1, int(len(original_sentences) * summary_percentage))
+        # Calculate total original words for percentage target
+        total_original_words = sum(len(word_tokenize(s)) for s in original_sentences)
+        target_word_count = int(total_original_words * summary_percentage)
+        
+        if target_word_count == 0:
+            # If the text is short and target is small, ensure at least one word is targeted
+            target_word_count = 1
 
-        # --- PHASE 1 & 2: SCORING & SELECTION (TextRank) ---
+        # --- SPECIAL CASE: Single sentence ---
+        if len(original_sentences) == 1:
+            return self._handle_single_sentence_case(original_sentences, cleaned_sentences, target_word_count)
+
+        # --- MULTIPLE SENTENCES: Normal TextRank processing ---
         
         try:
             sentence_vectors = self.vectorizer.fit_transform(cleaned_sentences)
@@ -121,27 +161,55 @@ class TextRankSummarizer:
         # Building the Graph via Cosine Similarity
         similarity_matrix = cosine_similarity(sentence_vectors)
         
-
+        # Create graph and calculate PageRank scores
         graph = nx.from_numpy_array(similarity_matrix)
-        scores = nx.pagerank(graph, alpha=self.damping_factor) 
+        scores = nx.pagerank(graph) 
 
-        # Selection of top N sentences
+        # Map scores to original indices
         ranked_sentences = {i: scores[i] for i in range(len(original_sentences))}
-        top_indices_with_score = nlargest(num_sentences_to_select, 
-                                          ranked_sentences.items(), 
-                                          key=lambda item: item[1])
+        
+        # Sort all sentences by score in descending order
+        sorted_ranks = sorted(ranked_sentences.items(), 
+                              key=lambda item: item[1], 
+                              reverse=True)
                                              
-        top_indices = {index for index, score in top_indices_with_score}
+        # --- WORD-BASED SELECTION, COMPRESSION & RECONSTRUCTION ---
         
-        # --- PHASE 3 & 4: COMPRESSION & RECONSTRUCTION ---
+        selected_sentences_by_index = {}
+        current_word_count = 0
         
-        final_summary = []
-        
-        for i, original_sentence in enumerate(original_sentences):
-            if i in top_indices:
-                # Compression step is applied only to the selected sentences
-                compressed_sentence = self._compress_sentence(original_sentence)
-                final_summary.append(compressed_sentence)
+        # Iterate through sentences from most important to least important
+        for index, score in sorted_ranks:
+            original_sentence = original_sentences[index]
+            
+            # 1. Compress the sentence deterministically
+            compressed_sentence = self._compress_sentence(original_sentence)
+            compressed_length = len(compressed_sentence.split())
+            
+            # 2. Check if adding the sentence exceeds the target word count
+            if current_word_count + compressed_length <= target_word_count:
+                selected_sentences_by_index[index] = compressed_sentence
+                current_word_count += compressed_length
+            else:
+                # If we go over the limit, stop adding sentences
+                break
                 
-        return " ".join(final_summary)
-
+        # If no sentences were selected (all were too long), pick the top one
+        if not selected_sentences_by_index and sorted_ranks:
+            top_index = sorted_ranks[0][0]
+            compressed = self._compress_sentence(original_sentences[top_index])
+            compressed_words = compressed.split()
+            # Return truncated version if needed
+            if len(compressed_words) > target_word_count:
+                selected_sentences_by_index[top_index] = ' '.join(compressed_words[:target_word_count])
+            else:
+                selected_sentences_by_index[top_index] = compressed
+                
+        # 3. Reconstruct the summary in original order
+        final_summary_parts = []
+        
+        # Sort the selected sentences by their original index (key)
+        for index in sorted(selected_sentences_by_index.keys()):
+            final_summary_parts.append(selected_sentences_by_index[index])
+            
+        return " ".join(final_summary_parts)
