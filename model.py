@@ -1,6 +1,7 @@
-import ollama
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from classifier import *
 from textrank import *
+import torch
 
 class Evaluation(object):
     def __init__(self):
@@ -8,11 +9,17 @@ class Evaluation(object):
         self.tokenizer = DistilBertTokenizerFast.from_pretrained("tokenizer")
 
     def run_LLM(self, prompt):
-        response = ollama.generate(
-        model='mistral',
-        prompt=prompt
+        tokenizerLLM = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+        modelLLM = AutoModelForCausalLM.from_pretrained(
+            "mistralai/Mistral-7B-v0.1",
+            device_map="auto",
+            load_in_4bit=True,
+            dtype=torch.float16
         )
-        return response['response']
+
+        inputs = tokenizerLLM(prompt, return_tensors="pt").to(modelLLM.device)
+        output = modelLLM.generate(**inputs, max_new_tokens=100)
+        return tokenizerLLM.decode(output[0], skip_special_tokens=True)
     
     def run_textrank(self, prompt):
         tr = TextRankSummarizer()

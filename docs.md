@@ -51,9 +51,9 @@ Stworzyliśmy **EcoPrompt Optimizer** – warstwę pośrednią, która automatyc
 ### Architektura rozwiązania:
 #### Krok A: Klasyfikacja intencji (BERT)
 Wykorzystano model **BERT (Bidirectional Encoder Representations from Transformers)**, poddany procesowi fine-tuningu na zbiorze konwersacyjnym.
-* **Funkcja:** Klasyfikacja binarna każdego zdania w prompcie.
-* **Logika:** Jeśli zdanie jest klasyfikowane jako "Greeting/Politeness" -> USUŃ. Jeśli "Content" -> ZACHOWAJ.
-* **Dlaczego BERT?** Doskonale rozumie kontekst. Odróżnia "Hi" (powitanie) od elementów kodu czy istotnych nazw własnych, czego nie robią proste filtry oparte na słowach kluczowych.
+* **Funkcja:** Klasyfikacja wieloklasowa każdego zdania w prompcie.
+* **Logika:** Jeśli zdanie jest klasyfikowane jako "Greeting/farewell/gratitude" -> odpowiedz hardcode'owaną odpowiedzią. Jeśli "prompt" -> przejdź dalej.
+* **Dlaczego BERT?** Doskonale rozumie kontekst. Odróżnia powitania, pożegnania i podziękowania od elementów kodu czy istotnych nazw własnych, czego nie robią proste filtry oparte na słowach kluczowych.
 
 #### Krok B: Ekstraktywna sumaryzacja (TextRank)
 Dla długich promptów zastosowano algorytm **TextRank**.

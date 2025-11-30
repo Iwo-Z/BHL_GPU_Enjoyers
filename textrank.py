@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from heapq import nlargest
-
+nltk.download('averaged_perceptron_tagger_eng')
 # --- NLTK Resource Management (Run once on module load) ---
 def _ensure_nltk_resources():
     """Checks and downloads necessary NLTK resources."""
@@ -25,7 +25,7 @@ def _ensure_nltk_resources():
             print(f"Downloading NLTK resource: {resource}...")
             nltk.download(resource)
 
-_ensure_nltk_resources() 
+# _ensure_nltk_resources() 
 # -----------------------------------------------------------
 
 class TextRankSummarizer:
