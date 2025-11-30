@@ -45,6 +45,34 @@ Stworzyliśmy **EcoPrompt Optimizer** – warstwę pośrednią, która automatyc
 * **Tokenizacja:** Podział tekstu na zdania w celu analizy ich wagi semantycznej.
 * **Analiza:** Zidentyfikowano, że średnio 15-20% tokenów w zapytaniach konwersacyjnych to "szum" (stopwords, zwroty grzecznościowe), co stanowi potencjał optymalizacyjny.
 
+### Generowanie treningowego zbioru danych
+
+### Cel i etykiety
+Skrypt generuje zbalansowany zbiór krótkich fraz rozmówkowych i „treści merytorycznej”, klasyfikowanych do czterech etykiet:
+* Label 0 – Greetings (powitania)
+* Label 1 – Thanks (podziękowania)
+* Label 2 – Goodbyes (pożegnania)
+* Label 3 – Others/Hard (pozostałe treści, w tym „tricky” i zwykłe prompty)
+
+Zbiór jest budowany tak, aby liczba przykładów dla Label 3 była zbliżona do łącznej liczby elementów klas 0–2 (balans klas).
+
+Główne etapy:
+1. Generowanie wariantów fraz dla etykiet 0–2 (różne wielkości liter oraz prosta interpunkcja dla krótkich fraz).
+2. Dodanie bogatej listy przykładów dla etykiety 3 (`TRICKY_PHRASES`).
+3. Opcjonalne doładowanie danych zewnętrznych do Label 3 z lokalnych plików CSV (patrz „Dane wejściowe – opcjonalne”).
+4. Scalenie i deduplikacja dokładnych duplikatów (case‑sensitive).
+5. Zapis gotowego zbioru i wygenerowanie wykresu rozkładu etykiet.
+
+Funkcje kluczowe:
+* `generate_variants(phrase, label)` – wytwarza proste warianty danej frazy.
+* `load_external_data(target_count=None)` – wczytuje dodatkowe przykłady Label 3 z plików CSV w bieżącym katalogu roboczym.
+* `build_final_dataset()` – buduje kompletny, zbalansowany dataset i zwraca listę `(text, label)`.
+* `plot_distribution(counts)` – zapisuje wykres rozkładu klas do pliku `dataset_distribution.png`.
+
+### Wyniki
+Skrypt zapisuje w bieżącym katalogu roboczym:
+* `categorized_phrases.csv` – plik CSV z kolumnami: `text`, `label`.
+* `dataset_distribution.png` – wykres rozkładu liczby rekordów w poszczególnych klasach.
 ---
 
 ## 3. Zastosowanie modeli uczenia maszynowego
@@ -82,3 +110,5 @@ Stworzony prototyp udowadnia, że można pogodzić wysoką jakość odpowiedzi s
 1.  Rozwiązuje problem ekologiczny (zużycie energii przez Data Center).
 2.  Wykorzystuje zbiory danych i modele AI (BERT, TextRank).
 3.  Jest gotowy do wdrożenia jako usługa biznesowa B2B.
+
+---
