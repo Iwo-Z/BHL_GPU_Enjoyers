@@ -1,5 +1,4 @@
 # Dokumentacja Projektu: Prompt Optimizer
-**Hackathon:** B#L - Best Hacking League (Edycja AI & Green Tech)
 **Data:** 30.11.2025
 **Nazwa Drużyny:** GPU Enjoyers
 
@@ -246,3 +245,62 @@ Stworzony prototyp udowadnia, że można pogodzić wysoką jakość odpowiedzi s
 
 
 ---
+
+## 5. Dodatkowa dokumentacja techniczna — mapowanie kodu i szybki start
+
+Poniższa sekcja dodaje bezpośrednie odniesienia do plików źródłowych i instrukcje uruchomienia zachowując całą treść powyżej.
+
+Szybki start (Windows / PowerShell)
+1. Utwórz środowisko i zainstaluj zależności:
+   ```powershell
+   py -3 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
+2. (Opcjonalne) Wygeneruj dataset:
+   ```powershell
+   python .\datasets\dataset_gen.py
+   ```
+   Wyniki: datasets\categorized_phrases.csv i dataset_distribution.png.
+3. Uruchom demo (Streamlit lub skrypt):
+   ```powershell
+   python .\main.py
+   ```
+   Uwaga: main.py używa zmiennych środowiskowych (np. GEMINI_API_KEY) oraz lokalnych artefaktów model/tokenizer (foldery "model" i "tokenizer") — sprawdź katalog projektu.
+
+Repo layout — pliki kluczowe
+- main.py
+  - Streamlit UI, orchestration pipeline, generate_content_with_retry (retry/backoff), pomiary energii (codecarbon).
+- utils\classifier.py
+  - Klasa Classifier, ładowanie modelu DistilBERT, metoda predict().
+- utils\textrank.py
+  - TextRankSummarizer: _ensure_nltk_resources(), summarize(), _compress_sentence().
+- utils\model.py
+  - Alternatywna klasa Evaluation pokazująca lokalne wywołanie LLM
+- datasets\dataset_gen.py
+  - Funkcje generate_variants, load_external_data, build_final_dataset, plot_distribution.
+- POC\
+  - Notebooki i skrypty eksperymentalne (fine‑tuning, pomiary energii).
+
+Mapowanie komponentów do implementacji (krótko)
+- Klasyfikacja intencji
+  - Plik: utils/classifier.py
+  - Model: lokalny folder "model" i "tokenizer" (ładowane z DistilBERT).
+  - Cel: wykryć powitania/podziękowania/pożegnania i uniknąć wysyłania ich do drogiego LLM.
+- Ekstraktywna sumaryzacja (TextRank + kompresja)
+  - Plik: utils/textrank.py
+  - Działanie: TF-IDF -> cosine_similarity -> PageRank (networkx) -> POS‑based compression.
+  - Zasoby NLTK: _ensure_nltk_resources() pobiera 'punkt', 'stopwords', 'averaged_perceptron_tagger' przy imporcie.
+- Wywołanie LLM
+  - Lokalnie: utils/model.py -> Evaluation.run_LLM()
+  - Zdalnie: main.py -> generate_content_with_retry() (Gemini API, potrzebny GEMINI_API_KEY).
+- Orkiestracja + pomiary
+  - main.py -> Evaluation.run_optimized_LLM(), run_processing_pipeline(), kod z codecarbon do zbierania emisji.
+
+Krótka ścieżka wykonywania (trace)
+1. main.py otrzymuje raw prompt.
+2. Classifier (utils/classifier.py) ocenia fragmenty; jeśli social → krótka odpowiedź bez LLM.
+3. Jeśli „prompt/content” → TextRankSummarizer.summarize() (utils/textrank.py).
+4. Skrócony prompt wysyłany do LLM (lokalnie lub Gemini API).
+5. Wynik oraz metryki energii/pomiarów zapisywane/wyświetlane.
+
