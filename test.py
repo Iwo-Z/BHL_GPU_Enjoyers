@@ -1,4 +1,4 @@
-from model import Evaluation
+from utils.model import Evaluation
 
 ev = Evaluation()
 print(ev.run_LLM("""Write a program in assembly language to calculate the sum of two numbers, where the numbers are stored in memory locations. The program should meet the following requirements:

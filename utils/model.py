@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from classifier import *
-from textrank import *
+from utils.classifier import *
+from utils.textrank import *
 import torch
 
 class Evaluation(object):

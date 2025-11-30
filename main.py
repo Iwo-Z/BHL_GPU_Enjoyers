@@ -3,18 +3,19 @@ import streamlit as st
 import time
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
-from classifier import *
-from textrank import *
+from utils.classifier import *
+from utils.textrank import *
 from codecarbon import EmissionsTracker
 import pandas as pd
-
-ENERGY_PER_WORD = 0.0000015
-
 import requests
 import time
 import json
 import os
 from dotenv import load_dotenv
+
+ENERGY_PER_WORD = 0.0000015
+
+
 
 load_dotenv()
 
