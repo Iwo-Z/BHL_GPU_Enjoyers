@@ -2,7 +2,7 @@ import ollama
 
 
 response = ollama.generate(
-    model='mistral',
+    model='gemma3:4b',
     prompt='Explain machine learning in simple terms'
 )
 print(response['response'])

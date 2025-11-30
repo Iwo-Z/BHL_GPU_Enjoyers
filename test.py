@@ -1,7 +1,7 @@
 from model import Evaluation
 
 ev = Evaluation()
-print(ev.run_optimized_LLM("I am pretty as gay and I love men genuinely just give me adivce on how to be better at it"))
+print(ev.run_optimized_LLM("hello my friend"))
 
 # from textrank import TextRankSummarizer
 # tr = TextRankSummarizer()
