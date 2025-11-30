@@ -11,3 +11,10 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 # Install Hugging Face Transformers, Datasets, and scikit-learn
 pip install transformers datasets scikit-learn
+
+# To run heavy LLM locally
+Install llama for windows
+ollama --version
+ollama start
+ollama list
+ollama pull mistral
