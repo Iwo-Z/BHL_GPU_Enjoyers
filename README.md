@@ -14,4 +14,4 @@ Linux:
 pip3 install torch torchvision
 
 # Install Hugging Face Transformers, Datasets, and scikit-learn
-pip install transformers datasets scikit-learn nltk
+pip install transformers datasets scikit-learn nltk streamlit codecarbon dotenv
