@@ -32,7 +32,13 @@ class Evaluation(object):
         class_ = cl.predict(prompt)
         print(f"Classified as: {class_}")
 
-        if class_ == "prompt":
+        if class_ == "greetings":
+            return "Hello there! How can I help you today?"
+        elif class_ == "thanking":
+            return "No problem! If you have any more questions, feel free to ask."
+        elif class_ == "goodbye":
+            return "Goodbye! Have a great day!"
+        elif class_ == "prompt": 
             return self.run_textrank(prompt)
         
-        return "HARDCODED TEXT"
+        return "error"

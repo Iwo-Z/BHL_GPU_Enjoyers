@@ -25,57 +25,40 @@ API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}
 MAX_RETRIES = 5
 
 def generate_content_with_retry(prompt: str, system_prompt: str) -> dict:
-    """
-    Sends a request to the Gemini API with exponential backoff for reliability.
-
-    Args:
-        prompt: The user query to send to the model.
-        system_prompt: The instruction to guide the model's behavior.
-
-    Returns:
-        The JSON response from the API, or an empty dictionary on failure.
-    """
     if not API_KEY:
         print("Error: API_KEY is missing. Please set your API key.")
         return {}
 
-    # Define the core API request payload
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        # Optional: Add tools:[{"google_search": {}}] here if you need grounding/web search
     }
 
     headers = {'Content-Type': 'application/json'}
     
     for attempt in range(MAX_RETRIES):
         try:
-            # Construct the full URL with the API key
+
             full_url = f"{API_URL}?key={API_KEY}"
             
-            # Use a short timeout suitable for "fast prompting"
             response = requests.post(
                 full_url, 
                 headers=headers, 
                 data=json.dumps(payload),
-                timeout=30 # 30 seconds timeout
+                timeout=30
             )
-            response.raise_for_status() # Raises an exception for HTTP errors (4xx or 5xx)
+            response.raise_for_status()
             
-            # Success! Return the parsed JSON response
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            # Handle specific HTTP error codes that suggest retrying
-            if response.status_code in [429, 500, 503]: # Too Many Requests, Internal Server Error, Service Unavailable
-                delay = 2 ** attempt + 1 # Exponential backoff: 2^0+1, 2^1+1, 2^2+1, ...
+            if response.status_code in [429, 500, 503]:
+                delay = 2 ** attempt + 1
                 time.sleep(delay)
             else:
-                # Other HTTP errors (e.g., 400 Bad Request, 401 Unauthorized) are generally not retryable
                 return {}
         
         except requests.exceptions.RequestException as e:
-            # Handle network issues, connection errors, and timeouts
             delay = 2 ** attempt + 1
             time.sleep(delay)
 
@@ -83,20 +66,15 @@ def generate_content_with_retry(prompt: str, system_prompt: str) -> dict:
 
 
 def ask_prompt(user_prompt):
-    """Main function to run the fast prompting script."""
-    
-    # 2. Define the system instruction for 'fast' and concise output
     system_instruction = (
         "You are an extremely fast and concise AI assistant. Your responses must be "
         "direct, short, and immediately answer the user's query without any preamble or fluff. "
     )
 
     
-    # Send the request
     api_response = generate_content_with_retry(user_prompt, system_instruction)
     
     if api_response:
-        # Extract the text content
         try:
             text_response = api_response['candidates'][0]['content']['parts'][0]['text']
             return text_response
@@ -108,8 +86,6 @@ def ask_prompt(user_prompt):
     
 
 class Evaluation(object):
-    """Encapsulates the full optimized LLM pipeline."""
-
     def __init__(self):
         self.model = DistilBertForSequenceClassification.from_pretrained("model")
         self.tokenizer = DistilBertTokenizerFast.from_pretrained("tokenizer")
@@ -129,51 +105,44 @@ class Evaluation(object):
         return tokenizerLLM.decode(output[0], skip_special_tokens=True)
     
     def run_textrank(self, prompt):
-        # Use the mocked TextRankSummarizer class
         tr = TextRankSummarizer()
         summary = tr.summarize(prompt)
         return summary
     
     def run_optimized_LLM(self, raw_prompt):
-        """
-        Executes the optimized pipeline and collects metrics for the frontend.
-        """
         cl = Classifier(self.model, self.tokenizer)
         tracker = EmissionsTracker()
         tracker.start()
 
         class_ = cl.predict(raw_prompt)
         
-        # Initialize metrics
         original_length = len(raw_prompt)
         processed_length = original_length
         reduction = 0.0
         is_greeting = False
         processed_prompt = raw_prompt
-        final_response = "Error: Unknown classification result." # Default
+        final_response = "Error: Unknown classification result."
 
-        if class_ != "prompt": 
-            # Case 1: Simple prompt (Greeting/Goodbye) -> Skip LLM
+        if class_ == "greetings":
             is_greeting = True
             final_response = "Hello there! How can I help you today?"
+        elif class_ == "thanking":
+            final_response = "No problem! If you have any more questions, feel free to ask."
+        elif class_ == "goodbye":
+            is_greeting = True
+            final_response = "Goodbye! Have a great day!"
             
         elif class_ == "prompt": 
-            # Case 2: Complex prompt -> Summarize and call LLM
-            
-            # 1. Summarization/Shortening
             summarized_prompt = self.run_textrank(raw_prompt)
             processed_prompt = summarized_prompt
             
-            # Calculate metrics
             processed_length = len(processed_prompt)
             if original_length > 0 and processed_length < original_length:
                 reduction = ((original_length - processed_length) / original_length) * 100
             
-            # 2. LLM Call
             final_response = self.run_LLM(processed_prompt)
             
         else:
-            # Fallback
             final_response = "Error: Classification logic returned an unexpected result."
 
         emissions = tracker.stop()
@@ -188,23 +157,12 @@ class Evaluation(object):
             "emissions": round(emissions, 1)
         }
 
-# =================================================================
-# --- STREAMLIT FRONTEND LOGIC ---
-# =================================================================
-
 def run_processing_pipeline(raw_prompt):
-    """
-    Instantiates the Evaluation object and runs the optimized pipeline.
-    Updates the results in Streamlit's session state.
-    """
-    
-    # Simulate setup delay
     time.sleep(0.5) 
 
     tracker = EmissionsTracker()
     tracker.start()
     
-    # Execute the user's core logic
     evaluator = Evaluation()
     processing_results = evaluator.run_optimized_LLM(raw_prompt)
     emissions1 = processing_results["emissions"]
@@ -222,21 +180,15 @@ def run_processing_pipeline(raw_prompt):
 
     print(f"Emissions without optimization: {energy_non_optimized} KWh")
     print(f"Emissions with optimization: {energy_optimized} KWh")
-    print(f"Emissions with optimization: {((energy_non_optimized/energy_optimized) - 1) * 100} KWh")
 
-    percentage_increase_energy = ((energy_non_optimized/energy_optimized) - 1) * 100
+    percentage_increase_energy = (energy_non_optimized - energy_optimized)/(energy_non_optimized + energy_optimized) * 100
     percentage_increase_rounded_energy = math.floor(percentage_increase_energy * 1000) / 1000
-
-    percentage_increase_emission = (emissions2 - emissions1) * 1000
-    percentage_increase_rounded_emission = math.floor(percentage_increase_emission * 1000) / 1000
     
-    # Unpack results into session state
-    # st.session_state.is_greeting = percentage_increase_rounded_emission
     st.session_state.processed_prompt = processing_results["processed_prompt"]
     st.session_state.original_length = processing_results["original_length"]
     st.session_state.processed_length = processing_results["processed_length"]
     st.session_state.reduction_percent = processing_results["reduction_percent"]
-    st.session_state.ai_response = processing_results["final_response"]
+    st.session_state.ai_response = "Yes."
     st.session_state.energy_saving = percentage_increase_rounded_energy
 
 
@@ -249,7 +201,6 @@ def main():
     st.title("🧠 Efficient AI Pipeline Demo")
     st.markdown("This application demonstrates a tiered architecture for **cost and energy efficiency** using custom classification and summarization.")
 
-    # --- SESSION STATE INITIALIZATION ---
     if "is_greeting" not in st.session_state:
         st.session_state.is_greeting = False
     if "processed_prompt" not in st.session_state:
@@ -262,28 +213,9 @@ def main():
         st.session_state.processed_length = 0
     if "reduction_percent" not in st.session_state:
         st.session_state.reduction_percent = 0.0
-    # --- END SESSION STATE INITIALIZATION ---
-    
-    # # --- SIDEBAR: Flow Visualization ---
-    # with st.sidebar:
-    #     st.subheader("AI Pipeline Flow")
-    #     st.markdown("""
-    #     The pipeline reduces costs and energy by:
-    #     1. **Classifying** simple prompts using a small, local model (DistilBERT).
-    #     2. **Summarizing** complex prompts using TextRank before calling the LLM.
-        
-    #     | Step | Logic Implemented | Action Result |
-    #     | :--- | :--- | :--- |
-    #     | **1. Input** | User enters prompt | Raw Text |
-    #     | **2. Classify** | `Classifier.predict()` | `hardcode` (Skip LLM) / `prompt` (Continue) |
-    #     | **3. Summarize** | `TextRankSummarizer.summarize()` | Prompt Shortening |
-    #     | **4. LLM Call** | `ollama.generate('mistral', ...)` | Final Response |
-    #     """)
-    # # --- END SIDEBAR ---
 
     st.subheader("1. Enter Your Raw Prompt")
     
-    # Input Area
     raw_prompt = st.text_area(
         "Input Prompt", 
         placeholder="e.g., Hi, I need a very detailed, multi-paragraph explanation of quantum computing, including its history and latest developments.", 
@@ -291,7 +223,6 @@ def main():
         key="current_raw_prompt_text_area"
     )
     
-    # Action Button
     if st.button("Run Optimized Pipeline", use_container_width=True, type="primary"):
         if not raw_prompt:
             st.error("Please enter a prompt to start the pipeline.")
@@ -300,8 +231,6 @@ def main():
                 run_processing_pipeline(raw_prompt)
     
     st.divider()
-
-    # --- RESULTS DISPLAY AND VISUALIZATION ---
     
     if st.session_state.ai_response:
         
