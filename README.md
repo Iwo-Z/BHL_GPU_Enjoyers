@@ -7,14 +7,11 @@ conda create -n myenv python=3.11
 conda activate myenv
 
 # Install PyTorch with CUDA 12.1 support
+Windows:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# Install Hugging Face Transformers, Datasets, and scikit-learn
-pip install transformers datasets scikit-learn
+Linux:
+pip3 install torch torchvision
 
-# To run heavy LLM locally
-Install llama for windows
-ollama --version
-ollama start
-ollama list
-ollama pull mistral
+# Install Hugging Face Transformers, Datasets, and scikit-learn
+pip install transformers datasets scikit-learn nltk
