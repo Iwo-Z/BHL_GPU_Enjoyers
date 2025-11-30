@@ -25,7 +25,7 @@ class Classifier:
 #
 # model = DistilBertForSequenceClassification.from_pretrained("model")
 # tokenizer = DistilBertTokenizerFast.from_pretrained("tokenizer")
-#
+
 # from classifier import *
 # c = Classifier(model, tokenizer)
 # c.predict("thanks")
