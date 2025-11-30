@@ -1,41 +1,131 @@
+import math
 import streamlit as st
 import time
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
 from classifier import *
 from textrank import *
+from codecarbon import EmissionsTracker
+import pandas as pd
 
-class Ollama(object):
-    @staticmethod
-    def generate(model, prompt):
-        if "quantum computing" in prompt.lower():
-            response_text = (
-                "Based on the summarized prompt, quantum computing utilizes quantum phenomena "
-                "like superposition and entanglement for computation. This targeted approach "
-                "saves energy by only passing the essential context to the model."
+ENERGY_PER_WORD = 0.0000015
+
+import requests
+import time
+import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
+MAX_RETRIES = 5
+
+def generate_content_with_retry(prompt: str, system_prompt: str) -> dict:
+    """
+    Sends a request to the Gemini API with exponential backoff for reliability.
+
+    Args:
+        prompt: The user query to send to the model.
+        system_prompt: The instruction to guide the model's behavior.
+
+    Returns:
+        The JSON response from the API, or an empty dictionary on failure.
+    """
+    if not API_KEY:
+        print("Error: API_KEY is missing. Please set your API key.")
+        return {}
+
+    # Define the core API request payload
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        # Optional: Add tools:[{"google_search": {}}] here if you need grounding/web search
+    }
+
+    headers = {'Content-Type': 'application/json'}
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Construct the full URL with the API key
+            full_url = f"{API_URL}?key={API_KEY}"
+            
+            # Use a short timeout suitable for "fast prompting"
+            response = requests.post(
+                full_url, 
+                headers=headers, 
+                data=json.dumps(payload),
+                timeout=30 # 30 seconds timeout
             )
-        else:
-            response_text = (
-                "The LLM received the shortened prompt and generated a relevant response. "
-                "The overall process was executed efficiently thanks to the pre-processing layer."
-            )
-        return {'response': response_text}
-ollama = Ollama()
+            response.raise_for_status() # Raises an exception for HTTP errors (4xx or 5xx)
+            
+            # Success! Return the parsed JSON response
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            # Handle specific HTTP error codes that suggest retrying
+            if response.status_code in [429, 500, 503]: # Too Many Requests, Internal Server Error, Service Unavailable
+                delay = 2 ** attempt + 1 # Exponential backoff: 2^0+1, 2^1+1, 2^2+1, ...
+                time.sleep(delay)
+            else:
+                # Other HTTP errors (e.g., 400 Bad Request, 401 Unauthorized) are generally not retryable
+                return {}
+        
+        except requests.exceptions.RequestException as e:
+            # Handle network issues, connection errors, and timeouts
+            delay = 2 ** attempt + 1
+            time.sleep(delay)
+
+    return {}
+
+
+def ask_prompt(user_prompt):
+    """Main function to run the fast prompting script."""
+    
+    # 2. Define the system instruction for 'fast' and concise output
+    system_instruction = (
+        "You are an extremely fast and concise AI assistant. Your responses must be "
+        "direct, short, and immediately answer the user's query without any preamble or fluff. "
+    )
+
+    
+    # Send the request
+    api_response = generate_content_with_retry(user_prompt, system_instruction)
+    
+    if api_response:
+        # Extract the text content
+        try:
+            text_response = api_response['candidates'][0]['content']['parts'][0]['text']
+            return text_response
+        except (KeyError, IndexError) as e:
+            print(f"Error parsing response structure: {e}")
+    else:
+        print("Could not retrieve content from the API.")
+
+    
 
 class Evaluation(object):
     """Encapsulates the full optimized LLM pipeline."""
 
     def __init__(self):
-        # Mock initialization for the frontend display
         self.model = DistilBertForSequenceClassification.from_pretrained("model")
         self.tokenizer = DistilBertTokenizerFast.from_pretrained("tokenizer")
 
     def run_LLM(self, prompt):
-        # Use the mocked Ollama class
-        response = ollama.generate(
-            model='mistral',
-            prompt=prompt
+        # return ask_prompt(prompt)
+        tokenizerLLM = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+        modelLLM = AutoModelForCausalLM.from_pretrained(
+            "mistralai/Mistral-7B-v0.1",
+            device_map="auto",
+            load_in_4bit=True,
+            dtype=torch.float16
         )
-        return response['response']
+
+        inputs = tokenizerLLM(prompt, return_tensors="pt").to(modelLLM.device)
+        output = modelLLM.generate(**inputs, max_new_tokens=100)
+        return tokenizerLLM.decode(output[0], skip_special_tokens=True)
     
     def run_textrank(self, prompt):
         # Use the mocked TextRankSummarizer class
@@ -48,6 +138,9 @@ class Evaluation(object):
         Executes the optimized pipeline and collects metrics for the frontend.
         """
         cl = Classifier(self.model, self.tokenizer)
+        tracker = EmissionsTracker()
+        tracker.start()
+
         class_ = cl.predict(raw_prompt)
         
         # Initialize metrics
@@ -82,6 +175,7 @@ class Evaluation(object):
             # Fallback
             final_response = "Error: Classification logic returned an unexpected result."
 
+        emissions = tracker.stop()
 
         return {
             "final_response": final_response,
@@ -89,7 +183,8 @@ class Evaluation(object):
             "processed_prompt": processed_prompt,
             "original_length": original_length,
             "processed_length": processed_length,
-            "reduction_percent": round(reduction, 1)
+            "reduction_percent": round(reduction, 1),
+            "emissions": round(emissions, 1)
         }
 
 # =================================================================
@@ -104,18 +199,44 @@ def run_processing_pipeline(raw_prompt):
     
     # Simulate setup delay
     time.sleep(0.5) 
+
+    tracker = EmissionsTracker()
+    tracker.start()
     
     # Execute the user's core logic
     evaluator = Evaluation()
     processing_results = evaluator.run_optimized_LLM(raw_prompt)
+    emissions1 = processing_results["emissions"]
+
+    tracker = EmissionsTracker()
+    tracker.start()
+
+    answer_simple = evaluator.run_LLM(raw_prompt)
+    emissions2 = tracker.stop()
+
+    df = pd.read_csv("emissions.csv")
+    df["energy_consumed"] = df["energy_consumed"].astype(float)
+    energy_optimized = df["energy_consumed"].iloc[0]
+    energy_non_optimized = df["energy_consumed"].iloc[1]
+
+    print(f"Emissions without optimization: {energy_non_optimized} KWh")
+    print(f"Emissions with optimization: {energy_optimized} KWh")
+    print(f"Emissions with optimization: {((energy_non_optimized/energy_optimized) - 1) * 100} KWh")
+
+    percentage_increase_energy = ((energy_non_optimized/energy_optimized) - 1) * 100
+    percentage_increase_rounded_energy = math.floor(percentage_increase_energy * 1000) / 1000
+
+    percentage_increase_emission = (emissions2 - emissions1) * 1000
+    percentage_increase_rounded_emission = math.floor(percentage_increase_emission * 1000) / 1000
     
     # Unpack results into session state
-    st.session_state.is_greeting = processing_results["is_greeting"]
+    # st.session_state.is_greeting = percentage_increase_rounded_emission
     st.session_state.processed_prompt = processing_results["processed_prompt"]
     st.session_state.original_length = processing_results["original_length"]
     st.session_state.processed_length = processing_results["processed_length"]
     st.session_state.reduction_percent = processing_results["reduction_percent"]
     st.session_state.ai_response = processing_results["final_response"]
+    st.session_state.energy_saving = percentage_increase_rounded_energy
 
 
 def main():
@@ -142,22 +263,22 @@ def main():
         st.session_state.reduction_percent = 0.0
     # --- END SESSION STATE INITIALIZATION ---
     
-    # --- SIDEBAR: Flow Visualization ---
-    with st.sidebar:
-        st.subheader("AI Pipeline Flow")
-        st.markdown("""
-        The pipeline reduces costs and energy by:
-        1. **Classifying** simple prompts using a small, local model (DistilBERT).
-        2. **Summarizing** complex prompts using TextRank before calling the LLM.
+    # # --- SIDEBAR: Flow Visualization ---
+    # with st.sidebar:
+    #     st.subheader("AI Pipeline Flow")
+    #     st.markdown("""
+    #     The pipeline reduces costs and energy by:
+    #     1. **Classifying** simple prompts using a small, local model (DistilBERT).
+    #     2. **Summarizing** complex prompts using TextRank before calling the LLM.
         
-        | Step | Logic Implemented | Action Result |
-        | :--- | :--- | :--- |
-        | **1. Input** | User enters prompt | Raw Text |
-        | **2. Classify** | `Classifier.predict()` | `hardcode` (Skip LLM) / `prompt` (Continue) |
-        | **3. Summarize** | `TextRankSummarizer.summarize()` | Prompt Shortening |
-        | **4. LLM Call** | `ollama.generate('mistral', ...)` | Final Response |
-        """)
-    # --- END SIDEBAR ---
+    #     | Step | Logic Implemented | Action Result |
+    #     | :--- | :--- | :--- |
+    #     | **1. Input** | User enters prompt | Raw Text |
+    #     | **2. Classify** | `Classifier.predict()` | `hardcode` (Skip LLM) / `prompt` (Continue) |
+    #     | **3. Summarize** | `TextRankSummarizer.summarize()` | Prompt Shortening |
+    #     | **4. LLM Call** | `ollama.generate('mistral', ...)` | Final Response |
+    #     """)
+    # # --- END SIDEBAR ---
 
     st.subheader("1. Enter Your Raw Prompt")
     
@@ -165,7 +286,7 @@ def main():
     raw_prompt = st.text_area(
         "Input Prompt", 
         placeholder="e.g., Hi, I need a very detailed, multi-paragraph explanation of quantum computing, including its history and latest developments.", 
-        height=150,
+        height=250,
         key="current_raw_prompt_text_area"
     )
     
@@ -174,9 +295,8 @@ def main():
         if not raw_prompt:
             st.error("Please enter a prompt to start the pipeline.")
         else:
-            with st.spinner("Executing optimized pipeline..."):
+            with st.spinner("Analyzing..."):
                 run_processing_pipeline(raw_prompt)
-                st.success("Pipeline executed successfully!")
     
     st.divider()
 
@@ -186,22 +306,17 @@ def main():
         
         st.subheader("2. Pipeline Status and Efficiency")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
-        with col1:
-            if st.session_state.is_greeting:
-                st.metric("Prompt Classified As", "HARDCODED (Greeting)", "LLM SKIPPED")
-            else:
-                st.metric("Prompt Classified As", "COMPLEX (Needs LLM)", "LLM CALLED")
                 
-        with col2:
-            st.metric("Reduction (%)", f"{st.session_state.reduction_percent}%", "Text Summarized")
+        with col1:
+            st.metric("Reduction (%)", f"{st.session_state.reduction_percent}%")
 
-        with col3:
+        with col2:
             if st.session_state.is_greeting:
-                st.metric("Efficiency Gain", "Tier 0 (Zero Cost)", "Max Savings")
+                st.metric("Efficiency Gain", "Max Savings")
             else:
-                st.metric("Efficiency Gain", "Tier 1 (Optimized Cost)", f"Saved {st.session_state.reduction_percent}% Tokens")
+                st.metric("Efficiency Gain", f"Saved {st.session_state.energy_saving}% KWh")
 
         st.markdown("---")
 
@@ -219,7 +334,7 @@ def main():
         st.subheader("4. Final AI Response")
         st.markdown(
             f"""
-            <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #10B981;">
+            <div style="padding: 20px; border-radius: 10px; border-left: 5px solid #10B981;">
                 {st.session_state.ai_response}
             </div>
             """, 
