@@ -1,4 +1,4 @@
-# Dokumentacja Projektu: EcoPrompt Optimizer
+# Dokumentacja Projektu: Prompt Optimizer
 **Hackathon:** B#L - Best Hacking League (Edycja AI & Green Tech)
 **Data:** 30.11.2025
 **Nazwa Drużyny:** GPU Enjoyers
@@ -19,7 +19,7 @@ Użytkownicy modeli językowych często tworzą nieefektywne prompty zawierając
 Model LLM przetwarza te "śmieciowe" dane, zużywając moc obliczeniową GPU i energię bez wnoszenia wartości merytorycznej.
 
 ### Proponowane rozwiązanie
-Stworzyliśmy **EcoPrompt Optimizer** – warstwę pośrednią, która automatycznie optymalizuje prompty przed wysłaniem ich do modelu docelowego. Rozwiązanie wykorzystuje NLP do usuwania szumu komunikacyjnego i kondensacji treści.
+Stworzyliśmy **Prompt Optimizer** – warstwę pośrednią, która automatycznie optymalizuje prompty przed wysłaniem ich do modelu docelowego. Rozwiązanie wykorzystuje NLP do usuwania szumu komunikacyjnego i kondensacji treści.
 
 ### Klient docelowy i korzyści biznesowe
 * **Klient:** Firmy SaaS i startupy technologiczne, które intensywnie wykorzystują płatne API w swoich produktach (np. chatboty obsługi klienta, asystenci kodowania).
@@ -77,6 +77,59 @@ Skrypt zapisuje w bieżącym katalogu roboczym:
 
 ## 3. Zastosowanie modeli uczenia maszynowego
 ### Architektura rozwiązania:
+
+```python
+model.train()
+for epoch in range(epochs):
+    total_loss = 0
+
+    for i, batch in enumerate(train_loader):
+        optimizer.zero_grad()
+
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels
+        )
+
+        loss = outputs.loss
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+        if i % 100 == 0:
+            print(f"Batch {i}, Loss: {loss.item():.4f}")
+
+    avg_loss = total_loss / len(train_loader)
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    model.eval()
+
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
+
+            outputs = model(input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
+
+            # Predictions for this batch
+            batch_preds = torch.argmax(logits, dim=1)
+
+            # Collect all predictions and labels
+            all_preds.extend(batch_preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+```
+
 #### Krok A: Klasyfikacja intencji (BERT)
 Wykorzystano model **BERT (Bidirectional Encoder Representations from Transformers)**, poddany procesowi fine-tuningu na zbiorze konwersacyjnym.
 * **Funkcja:** Klasyfikacja wieloklasowa każdego zdania w prompcie.
@@ -85,30 +138,111 @@ Wykorzystano model **BERT (Bidirectional Encoder Representations from Transforme
 
 #### Krok B: Ekstraktywna sumaryzacja (TextRank)
 Dla długich promptów zastosowano algorytm **TextRank**.
+##### Fragment kodu
+```python
+
+def summarize(self, input_text, summary_percentage=0.7):
+        """
+        Generates the compressed summary.
+        """
+        original_sentences, cleaned_sentences = self._clean_and_process_sentences(input_text)
+
+        if not original_sentences or all(not s for s in cleaned_sentences):
+            return "Cannot summarize empty or non-text content."
+
+        total_original_words = sum(len(word_tokenize(s)) for s in original_sentences)
+        target_word_count = int(total_original_words * summary_percentage)
+        
+        if target_word_count == 0:
+            target_word_count = 1
+
+        if len(original_sentences) == 1:
+            return self._handle_single_sentence_case(original_sentences, cleaned_sentences, target_word_count)
+        
+        try:
+            sentence_vectors = self.vectorizer.fit_transform(cleaned_sentences)
+        except ValueError:
+            return "The document contains no significant words after cleaning."
+
+        similarity_matrix = cosine_similarity(sentence_vectors)
+        
+        graph = nx.from_numpy_array(similarity_matrix)
+        scores = nx.pagerank(graph) 
+
+        ranked_sentences = {i: scores[i] for i in range(len(original_sentences))}
+        
+        sorted_ranks = sorted(ranked_sentences.items(), 
+                              key=lambda item: item[1], 
+                              reverse=True)
+                                             
+        # --- WORD-BASED SELECTION, COMPRESSION & RECONSTRUCTION ---
+        selected_sentences_by_index = {}
+        current_word_count = 0
+        for index, score in sorted_ranks:
+            original_sentence = original_sentences[index]
+            
+            compressed_sentence = self._compress_sentence(original_sentence)
+            compressed_length = len(compressed_sentence.split())
+            
+            if current_word_count + compressed_length <= target_word_count:
+                selected_sentences_by_index[index] = compressed_sentence
+                current_word_count += compressed_length
+            else:
+                break
+                
+        if not selected_sentences_by_index and sorted_ranks:
+            top_index = sorted_ranks[0][0]
+            compressed = self._compress_sentence(original_sentences[top_index])
+            compressed_words = compressed.split()
+            if len(compressed_words) > target_word_count:
+                selected_sentences_by_index[top_index] = ' '.join(compressed_words[:target_word_count])
+            else:
+                selected_sentences_by_index[top_index] = compressed
+                
+        final_summary_parts = []
+        
+        for index in sorted(selected_sentences_by_index.keys()):
+            final_summary_parts.append(selected_sentences_by_index[index])
+            
+        return " ".join(final_summary_parts)
+
+
+```
+
 * **Funkcja:** Budowa grafu, gdzie wierzchołkami są zdania, a krawędziami ich podobieństwo semantyczne.
 * **Działanie:** Wybierane są tylko zdania o najwyższej randze (najważniejsze dla kontekstu), tworząc skróconą wersję tekstu.
 * **Zaleta:** TextRank jest algorytmem "lekkim" obliczeniowo w porównaniu do generowania podsumowań przez LLM, co wpisuje się w ideę *Green AI*.
 
 #### Krok C: Porównanie rozwiązań
 Porównaliśmy nasze podejście hybrydowe (BERT + TextRank) z brakiem preprocessingu.
-* *Truncation:* Szybkie, ale traci sens logiczny przy długich tekstach.
-* *EcoPrompt (Nasze):* Zachowuje sens semantyczny (zgodność cosine similarity > 0.9) przy redukcji tokenów o średnio 25%.
+* *Brak preprocessingu:* Wolne, zużywa dużo tokenów.
+* *Prompt Optimizer:* Zachowuje sens semantyczny (zgodność cosine similarity > 0.9) przy redukcji tokenów o średnio 25%.
 
 ---
 
 ## 4. Prezentacja rozwiązania i wnioski
 ### Sposób działania (Workflow)
 1.  Użytkownik wysyła zapytanie: *"Cześć, mam problem z kodem, mógłbyś zerknąć? Oto on: [Długi Kod]. Z góry dzięki!"*
-2.  **EcoPrompt API** przetwarza tekst:
+2.  **Prompt Optimizer API** przetwarza tekst:
     * BERT usuwa: *"Cześć, mam problem z kodem, mógłbyś zerknąć?"* oraz *"Z góry dzięki!"*.
     * TextRank analizuje kod/opis i kondensuje go, jeśli jest zbyt rozwlekły.
 3.  Do LLM (np. GPT-4) trafia tylko: *"Analiza błędu: [Długi Kod]"*.
 4.  LLM zwraca poprawną odpowiedź, zużywając mniej tokenów.
 
-### Wnioski końcowe [cite: 40]
+### Wnioski końcowe
 Stworzony prototyp udowadnia, że można pogodzić wysoką jakość odpowiedzi systemów AI z dbałością o środowisko. Projekt spełnia założenia hackathonu:
 1.  Rozwiązuje problem ekologiczny (zużycie energii przez Data Center).
 2.  Wykorzystuje zbiory danych i modele AI (BERT, TextRank).
 3.  Jest gotowy do wdrożenia jako usługa biznesowa B2B.
+
+### Bibliografia
+- https://economictimes.indiatimes.com/magazines/panache/do-you-say-please-to-chatgpt-sam-altman-reveals-how-much-electricity-your-manners-cost-to-openai/articleshow/120455018.cms?utm_source=chatgpt.com&from=mdr
+- https://www.techi.com/sam-altman-ai-politeness-costs-energy/?utm_source=chatgpt.com
+- https://www.sciencenews.org/article/ai-energy-carbon-emissions-chatgpt?utm_source=chatgpt.com
+- https://www.kaggle.com/datasets/thedevastator/dailydialog-unlock-the-conversation-potential-in
+- https://aclanthology.org/W04-3252/
+- https://arxiv.org/abs/1810.04805
+
+
 
 ---
